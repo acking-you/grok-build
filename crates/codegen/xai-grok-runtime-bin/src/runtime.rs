@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, bail};
+use std::time::{Duration, Instant};
 use xai_grok_sampler::SamplingClient;
-use xai_grok_sampling_types::{ConversationItem, ConversationRequest, HostedTool, ToolCall};
+use xai_grok_sampling_types::{
+    ConversationItem, ConversationRequest, ConversationResponse, HostedTool, ToolCall,
+};
 
 use crate::config::RuntimeConfig;
 use crate::tools::{ToolRuntime, WEB_SEARCH_TOOL_NAME};
@@ -49,8 +52,7 @@ impl AgentRuntime {
             request.max_output_tokens = Some(self.config.max_output_tokens);
 
             let response = self
-                .client
-                .conversation_collect(request)
+                .collect_inference(&format!("agent-turn-{turn}"), request)
                 .await
                 .with_context(|| format!("inference failed on turn {turn}"))?;
             let assistant = response
@@ -70,13 +72,32 @@ impl AgentRuntime {
 
             for call in tool_calls {
                 tool_call_count = tool_call_count.saturating_add(1);
-                eprintln!("[tool] {}", call.name);
+                eprintln!(
+                    "[tool:start] turn={turn} sequence={tool_call_count} id={} name={} {}",
+                    call.id,
+                    call.name,
+                    self.tools.describe_call(&call)
+                );
+                let started = Instant::now();
                 let result = if call.name == WEB_SEARCH_TOOL_NAME {
                     let search = self.run_web_search(&call).await;
                     self.tools.format_result(search)
                 } else {
                     self.tools.execute(&call).await
                 };
+                let status = if result.starts_with("Error:") {
+                    "error"
+                } else {
+                    "ok"
+                };
+                eprintln!(
+                    "[tool:done] turn={turn} sequence={tool_call_count} id={} name={} status={status} elapsed_ms={} output_bytes={} preview={}",
+                    call.id,
+                    call.name,
+                    started.elapsed().as_millis(),
+                    result.len(),
+                    preview_for_log(&result, 240)
+                );
                 history.push(ConversationItem::tool_result(call.id.as_ref(), result));
             }
         }
@@ -102,8 +123,7 @@ impl AgentRuntime {
         request.max_output_tokens = Some(self.config.max_output_tokens);
 
         let response = self
-            .client
-            .conversation_collect(request)
+            .collect_inference("hosted-web-search", request)
             .await
             .context("hosted web search failed")?;
         let answer = response
@@ -116,6 +136,58 @@ impl AgentRuntime {
             bail!("web search returned no text result");
         }
         Ok(answer)
+    }
+
+    async fn collect_inference(
+        &self,
+        phase: &str,
+        request: ConversationRequest,
+    ) -> Result<ConversationResponse> {
+        let backend = match self.config.backend {
+            crate::config::Backend::Responses => "responses",
+            crate::config::Backend::Anthropic => "anthropic",
+        };
+        eprintln!(
+            "[model:start] phase={phase} backend={backend} model={} input_items={} tools={} timeout_secs={}",
+            preview_for_log(&self.config.model, 200),
+            request.items.len(),
+            request.tools.len() + request.hosted_tools.len(),
+            self.config.inference_timeout_secs
+        );
+        let started = Instant::now();
+        let timeout_after = Duration::from_secs(self.config.inference_timeout_secs);
+        match tokio::time::timeout(timeout_after, self.client.conversation_collect(request)).await {
+            Ok(Ok(response)) => {
+                let (text_bytes, tool_calls) = response
+                    .assistant()
+                    .map(|assistant| (assistant.content.len(), assistant.tool_calls.len()))
+                    .unwrap_or_default();
+                eprintln!(
+                    "[model:done] phase={phase} status=ok elapsed_ms={} output_text_bytes={text_bytes} tool_calls={tool_calls}",
+                    started.elapsed().as_millis()
+                );
+                Ok(response)
+            }
+            Ok(Err(error)) => {
+                eprintln!(
+                    "[model:error] phase={phase} status=error elapsed_ms={} error={}",
+                    started.elapsed().as_millis(),
+                    preview_for_log(&error.to_string(), 500)
+                );
+                Err(error.into())
+            }
+            Err(_) => {
+                eprintln!(
+                    "[model:error] phase={phase} status=timeout elapsed_ms={} timeout_secs={}",
+                    started.elapsed().as_millis(),
+                    self.config.inference_timeout_secs
+                );
+                bail!(
+                    "{phase} timed out after {} seconds",
+                    self.config.inference_timeout_secs
+                )
+            }
+        }
     }
 
     fn system_prompt(&self) -> String {
@@ -139,4 +211,18 @@ external information.",
         }
         prompt
     }
+}
+
+fn preview_for_log(value: &str, max_chars: usize) -> String {
+    serde_json::to_string(&bounded_preview(value, max_chars))
+        .unwrap_or_else(|_| "\"<unprintable>\"".into())
+}
+
+fn bounded_preview(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let mut preview = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        preview.push('…');
+    }
+    preview
 }

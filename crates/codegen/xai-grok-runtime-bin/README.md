@@ -72,3 +72,13 @@ returns its result to the main agent. OpenAI Responses backends receive the
 native `web_search` tool; Anthropic backends receive
 `web_search_20250305`. The selected provider or gateway must support its hosted
 web-search tool type.
+
+Each tool invocation emits a detailed start line with its call id and concrete
+arguments (workspace path, line range, query, command, or bounded edit/write
+preview), followed by a completion line with status, elapsed time, output size,
+and a bounded result preview.
+
+Model requests emit matching `model:start`, `model:done`, or `model:error`
+events so slow providers remain observable. Every inference and hosted-search
+request has a 120-second total timeout by default; change it with
+`--inference-timeout-secs` or `inference_timeout_secs` in TOML.

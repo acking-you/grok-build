@@ -11,6 +11,7 @@ use xai_grok_sampler::{ApiBackend, AuthScheme, SamplerConfig};
 
 const DEFAULT_MAX_TURNS: u32 = 16;
 const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 8_192;
+const DEFAULT_INFERENCE_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 
@@ -129,6 +130,10 @@ pub struct Cli {
     #[arg(long)]
     pub tool_timeout_secs: Option<u64>,
 
+    /// Total timeout for each model or hosted web-search request.
+    #[arg(long)]
+    pub inference_timeout_secs: Option<u64>,
+
     /// Maximum bytes returned by one tool call.
     #[arg(long)]
     pub max_tool_output_bytes: Option<usize>,
@@ -156,6 +161,7 @@ struct FileConfig {
     max_turns: Option<u32>,
     max_output_tokens: Option<u32>,
     tool_timeout_secs: Option<u64>,
+    inference_timeout_secs: Option<u64>,
     max_tool_output_bytes: Option<usize>,
     system_prompt: Option<String>,
     #[serde(default)]
@@ -179,6 +185,7 @@ pub struct RuntimeConfig {
     pub max_turns: u32,
     pub max_output_tokens: u32,
     pub tool_timeout_secs: u64,
+    pub inference_timeout_secs: u64,
     pub max_tool_output_bytes: usize,
     pub system_prompt: Option<String>,
 }
@@ -255,6 +262,13 @@ impl ResolvedInput {
         if tool_timeout_secs == 0 {
             bail!("tool_timeout_secs must be greater than zero");
         }
+        let inference_timeout_secs = cli
+            .inference_timeout_secs
+            .or(file.inference_timeout_secs)
+            .unwrap_or(DEFAULT_INFERENCE_TIMEOUT_SECS);
+        if inference_timeout_secs == 0 {
+            bail!("inference_timeout_secs must be greater than zero");
+        }
         let max_tool_output_bytes = cli
             .max_tool_output_bytes
             .or(file.max_tool_output_bytes)
@@ -288,6 +302,7 @@ impl ResolvedInput {
                 max_turns,
                 max_output_tokens,
                 tool_timeout_secs,
+                inference_timeout_secs,
                 max_tool_output_bytes,
                 system_prompt: cli.system_prompt.or(file.system_prompt),
             },

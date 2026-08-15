@@ -22,9 +22,38 @@ fn config(server: &MockInferenceServer, backend: Backend) -> RuntimeConfig {
         max_turns: 2,
         max_output_tokens: 1024,
         tool_timeout_secs: 5,
+        inference_timeout_secs: 5,
         max_tool_output_bytes: 4096,
         system_prompt: None,
     }
+}
+
+#[tokio::test]
+async fn model_request_has_a_total_timeout() {
+    let server = MockInferenceServer::start_with_models(vec![
+        MockModelEntry::new("test-model").with_api_backend("messages"),
+    ])
+    .await
+    .unwrap();
+    server.hold_agent_completions();
+    let mut runtime_config = config(&server, Backend::Anthropic);
+    runtime_config.inference_timeout_secs = 1;
+
+    let error = AgentRuntime::new(runtime_config)
+        .unwrap()
+        .run_prompt("never finish")
+        .await
+        .unwrap_err();
+    server.release_agent_completions();
+
+    assert!(
+        error.to_string().contains("inference failed on turn 1"),
+        "{error:#}"
+    );
+    assert!(
+        format!("{error:#}").contains("agent-turn-1 timed out after 1 seconds"),
+        "{error:#}"
+    );
 }
 
 #[tokio::test]

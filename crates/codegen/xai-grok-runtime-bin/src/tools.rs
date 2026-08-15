@@ -159,6 +159,70 @@ impl ToolRuntime {
         Ok(query.to_owned())
     }
 
+    pub(crate) fn describe_call(&self, call: &ToolCall) -> String {
+        match call.name.as_str() {
+            WEB_SEARCH_TOOL_NAME => parse::<WebSearchArgs>(&call.arguments)
+                .map(|args| format!("query={}", log_value(&args.query, 1_000)))
+                .unwrap_or_else(|error| invalid_arguments(&call.arguments, &error)),
+            "read_file" => parse::<ReadFileArgs>(&call.arguments)
+                .map(|args| {
+                    let offset = args.offset.unwrap_or(1);
+                    let limit = args.limit.unwrap_or(400).min(2_000);
+                    let end = offset.saturating_add(limit).saturating_sub(1);
+                    format!("path={} lines={offset}..={end}", self.log_path(&args.path))
+                })
+                .unwrap_or_else(|error| invalid_arguments(&call.arguments, &error)),
+            "list_files" => parse::<PathArgs>(&call.arguments)
+                .map(|args| {
+                    format!(
+                        "path={}",
+                        self.log_path(args.path.as_deref().unwrap_or("."))
+                    )
+                })
+                .unwrap_or_else(|error| invalid_arguments(&call.arguments, &error)),
+            "search" => parse::<SearchArgs>(&call.arguments)
+                .map(|args| {
+                    format!(
+                        "path={} query={}",
+                        self.log_path(args.path.as_deref().unwrap_or(".")),
+                        log_value(&args.query, 1_000)
+                    )
+                })
+                .unwrap_or_else(|error| invalid_arguments(&call.arguments, &error)),
+            "write_file" => parse::<WriteFileArgs>(&call.arguments)
+                .map(|args| {
+                    format!(
+                        "path={} content_bytes={} content_preview={}",
+                        self.log_path(&args.path),
+                        args.content.len(),
+                        log_value(&args.content, 160)
+                    )
+                })
+                .unwrap_or_else(|error| invalid_arguments(&call.arguments, &error)),
+            "edit_file" => parse::<EditFileArgs>(&call.arguments)
+                .map(|args| {
+                    format!(
+                        "path={} replace_all={} old_text={} new_text={}",
+                        self.log_path(&args.path),
+                        args.replace_all,
+                        log_value(&args.old_text, 160),
+                        log_value(&args.new_text, 160)
+                    )
+                })
+                .unwrap_or_else(|error| invalid_arguments(&call.arguments, &error)),
+            "bash" => parse::<BashArgs>(&call.arguments)
+                .map(|args| {
+                    format!(
+                        "cwd={} command={}",
+                        log_value(&self.root.display().to_string(), 1_000),
+                        log_value(&args.command, 2_000)
+                    )
+                })
+                .unwrap_or_else(|error| invalid_arguments(&call.arguments, &error)),
+            _ => format!("arguments={}", log_value(&call.arguments, 1_000)),
+        }
+    }
+
     async fn execute_inner(&self, call: &ToolCall) -> Result<String> {
         match call.name.as_str() {
             "read_file" => self.read_file(parse(&call.arguments)?),
@@ -403,6 +467,13 @@ impl ToolRuntime {
             relative.to_owned()
         })
     }
+
+    fn log_path(&self, input: &str) -> String {
+        let display = safe_relative(input)
+            .map(|relative| self.root.join(relative).display().to_string())
+            .unwrap_or_else(|_| input.to_owned());
+        log_value(&display, 1_000)
+    }
 }
 
 fn spec(name: &str, description: &str, parameters: serde_json::Value) -> ToolSpec {
@@ -415,6 +486,23 @@ fn spec(name: &str, description: &str, parameters: serde_json::Value) -> ToolSpe
 
 fn parse<T: for<'de> Deserialize<'de>>(arguments: &str) -> Result<T> {
     serde_json::from_str(arguments).context("parse tool arguments")
+}
+
+fn invalid_arguments(arguments: &str, error: &anyhow::Error) -> String {
+    format!(
+        "arguments={} parse_error={}",
+        log_value(arguments, 1_000),
+        log_value(&error.to_string(), 300)
+    )
+}
+
+fn log_value(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let mut preview = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        preview.push('…');
+    }
+    serde_json::to_string(&preview).unwrap_or_else(|_| "\"<unprintable>\"".into())
 }
 
 fn safe_relative(input: &str) -> Result<PathBuf> {
@@ -566,6 +654,42 @@ mod tests {
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"edit_file".to_owned()));
         assert!(names.contains(&"bash".to_owned()));
+    }
+
+    #[test]
+    fn tool_descriptions_include_targets_and_inputs() {
+        let root = tempfile::tempdir().unwrap();
+        let canonical_root = dunce::canonicalize(root.path()).unwrap();
+        let tools = ToolRuntime::new(canonical_root.clone(), true, true, 5, 4096);
+        let root_text = canonical_root.display().to_string();
+
+        let read = tools.describe_call(&call(
+            "read_file",
+            json!({"path":"src/main.rs","offset":12,"limit":20}),
+        ));
+        assert!(read.contains(&format!("{root_text}/src/main.rs")), "{read}");
+        assert!(read.contains("lines=12..=31"), "{read}");
+
+        let search = tools.describe_call(&call("search", json!({"path":"src","query":"fn main"})));
+        assert!(search.contains(&format!("{root_text}/src")), "{search}");
+        assert!(search.contains("query=\"fn main\""), "{search}");
+
+        let write = tools.describe_call(&call(
+            "write_file",
+            json!({"path":"notes.txt","content":"first line\nsecond line"}),
+        ));
+        assert!(write.contains("content_bytes=22"), "{write}");
+        assert!(
+            write.contains("content_preview=\"first line\\nsecond line\""),
+            "{write}"
+        );
+
+        let shell = tools.describe_call(&call("bash", json!({"command":"printf 'hello world'"})));
+        assert!(shell.contains(&format!("cwd=\"{root_text}\"")), "{shell}");
+        assert!(
+            shell.contains("command=\"printf 'hello world'\""),
+            "{shell}"
+        );
     }
 
     #[tokio::test]

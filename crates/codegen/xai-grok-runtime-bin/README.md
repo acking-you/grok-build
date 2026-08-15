@@ -82,3 +82,8 @@ Model requests emit matching `model:start`, `model:done`, or `model:error`
 events so slow providers remain observable. Every inference and hosted-search
 request has a 120-second total timeout by default; change it with
 `--inference-timeout-secs` or `inference_timeout_secs` in TOML.
+
+The default output cap is 8192 tokens for Responses and 4096 for Anthropic.
+The lower Anthropic default avoids providers that stall before the first stream
+event when asked for an 8192-token tool-use turn; either value can be overridden
+with `--max-output-tokens` or `max_output_tokens` in TOML.

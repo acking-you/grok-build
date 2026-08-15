@@ -10,7 +10,8 @@ use serde::Deserialize;
 use xai_grok_sampler::{ApiBackend, AuthScheme, SamplerConfig};
 
 const DEFAULT_MAX_TURNS: u32 = 16;
-const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 8_192;
+const DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS: u32 = 8_192;
+const DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const DEFAULT_INFERENCE_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
@@ -43,6 +44,13 @@ impl Backend {
         match self {
             Self::Responses => AuthMode::Bearer,
             Self::Anthropic => AuthMode::XApiKey,
+        }
+    }
+
+    fn default_max_output_tokens(self) -> u32 {
+        match self {
+            Self::Responses => DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS,
+            Self::Anthropic => DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS,
         }
     }
 }
@@ -251,7 +259,7 @@ impl ResolvedInput {
         let max_output_tokens = cli
             .max_output_tokens
             .or(file.max_output_tokens)
-            .unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS);
+            .unwrap_or_else(|| backend.default_max_output_tokens());
         if max_output_tokens == 0 {
             bail!("max_output_tokens must be greater than zero");
         }
@@ -368,4 +376,25 @@ fn parse_key_value(value: &str) -> std::result::Result<(String, String), String>
         return Err("header key and value must both be non-empty".into());
     }
     Ok((key.trim().to_owned(), value.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_output_defaults_avoid_anthropic_large_cap_stalls() {
+        assert_eq!(
+            Backend::Responses.default_max_output_tokens(),
+            DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS
+        );
+        assert_eq!(
+            Backend::Anthropic.default_max_output_tokens(),
+            DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS
+        );
+        assert!(
+            Backend::Anthropic.default_max_output_tokens()
+                < Backend::Responses.default_max_output_tokens()
+        );
+    }
 }

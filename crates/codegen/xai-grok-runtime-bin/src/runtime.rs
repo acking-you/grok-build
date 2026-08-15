@@ -45,8 +45,15 @@ impl AgentRuntime {
             ConversationItem::user(prompt.into()),
         ];
         let mut tool_call_count = 0u32;
+        let mut turn = 1u32;
 
-        for turn in 1..=self.config.max_turns {
+        loop {
+            if let Some(max_turns) = self.config.max_turns
+                && turn > max_turns
+            {
+                bail!("agent exceeded the configured maximum of {max_turns} turns");
+            }
+
             let mut request =
                 ConversationRequest::from_items(history.clone()).with_tools(self.tools.specs());
             request.max_output_tokens = Some(self.config.max_output_tokens);
@@ -100,12 +107,11 @@ impl AgentRuntime {
                 );
                 history.push(ConversationItem::tool_result(call.id.as_ref(), result));
             }
-        }
 
-        bail!(
-            "agent exceeded the configured maximum of {} turns",
-            self.config.max_turns
-        )
+            turn = turn
+                .checked_add(1)
+                .context("agent turn counter overflowed")?;
+        }
     }
 
     async fn run_web_search(&self, call: &ToolCall) -> Result<String> {

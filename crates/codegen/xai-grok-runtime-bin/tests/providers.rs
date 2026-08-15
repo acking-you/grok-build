@@ -19,7 +19,7 @@ fn config(server: &MockInferenceServer, backend: Backend) -> RuntimeConfig {
         cwd: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
         allow_write: false,
         allow_shell: false,
-        max_turns: 2,
+        max_turns: Some(2),
         max_output_tokens: 1024,
         tool_timeout_secs: 5,
         inference_timeout_secs: 5,
@@ -129,6 +129,74 @@ async fn responses_backend_runs_a_local_tool_and_continues() {
         "second request should return the tool result: {}",
         bodies[1]
     );
+}
+
+#[tokio::test]
+async fn agent_runs_until_completion_without_a_turn_limit() {
+    let server = MockInferenceServer::start_with_models(vec![
+        MockModelEntry::new("test-model").with_api_backend("responses"),
+    ])
+    .await
+    .unwrap();
+    for sequence in 1..=3 {
+        server.enqueue_response(
+            "/v1/responses",
+            ScriptedResponse::sse(sse::responses_api_reasoning_then_tool_call_events(
+                "continue inspecting",
+                &format!("call-read-{sequence}"),
+                "read_file",
+                r#"{"path":"Cargo.toml","limit":1}"#,
+                "test-model",
+            )),
+        );
+    }
+    server.set_response("finished after all required work");
+    let mut runtime_config = config(&server, Backend::Responses);
+    runtime_config.max_turns = None;
+
+    let outcome = AgentRuntime::new(runtime_config)
+        .unwrap()
+        .run_prompt("inspect until finished")
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.text, "finished after all required work");
+    assert_eq!(outcome.turns, 4);
+    assert_eq!(outcome.tool_calls, 3);
+    assert_eq!(server.request_bodies().len(), 4);
+}
+
+#[tokio::test]
+async fn explicit_turn_limit_remains_a_safety_cap() {
+    let server = MockInferenceServer::start_with_models(vec![
+        MockModelEntry::new("test-model").with_api_backend("responses"),
+    ])
+    .await
+    .unwrap();
+    server.enqueue_response(
+        "/v1/responses",
+        ScriptedResponse::sse(sse::responses_api_reasoning_then_tool_call_events(
+            "inspect the manifest",
+            "call-read",
+            "read_file",
+            r#"{"path":"Cargo.toml","limit":1}"#,
+            "test-model",
+        )),
+    );
+    let mut runtime_config = config(&server, Backend::Responses);
+    runtime_config.max_turns = Some(1);
+
+    let error = AgentRuntime::new(runtime_config)
+        .unwrap()
+        .run_prompt("keep inspecting")
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "agent exceeded the configured maximum of 1 turns"
+    );
+    assert_eq!(server.request_bodies().len(), 1);
 }
 
 #[tokio::test]

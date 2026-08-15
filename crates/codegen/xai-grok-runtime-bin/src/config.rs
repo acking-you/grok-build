@@ -9,7 +9,6 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use xai_grok_sampler::{ApiBackend, AuthScheme, SamplerConfig};
 
-const DEFAULT_MAX_TURNS: u32 = 16;
 const DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS: u32 = 8_192;
 const DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const DEFAULT_INFERENCE_TIMEOUT_SECS: u64 = 120;
@@ -126,7 +125,7 @@ pub struct Cli {
     #[arg(long, conflicts_with = "allow_shell")]
     pub no_shell: bool,
 
-    /// Maximum model/tool turns before stopping.
+    /// Optional model/tool turn safety cap. Unlimited when omitted.
     #[arg(long)]
     pub max_turns: Option<u32>,
 
@@ -190,7 +189,7 @@ pub struct RuntimeConfig {
     pub cwd: PathBuf,
     pub allow_write: bool,
     pub allow_shell: bool,
-    pub max_turns: u32,
+    pub max_turns: Option<u32>,
     pub max_output_tokens: u32,
     pub tool_timeout_secs: u64,
     pub inference_timeout_secs: u64,
@@ -249,12 +248,9 @@ impl ResolvedInput {
             bail!("workspace root is not a directory: {}", cwd.display());
         }
 
-        let max_turns = cli
-            .max_turns
-            .or(file.max_turns)
-            .unwrap_or(DEFAULT_MAX_TURNS);
-        if max_turns == 0 {
-            bail!("max_turns must be greater than zero");
+        let max_turns = cli.max_turns.or(file.max_turns);
+        if max_turns == Some(0) {
+            bail!("max_turns must be greater than zero when set");
         }
         let max_output_tokens = cli
             .max_output_tokens

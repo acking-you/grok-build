@@ -14,7 +14,7 @@ cargo build -p xai-grok-runtime-bin --profile runtime-release
 The binary is written to `target/runtime-release/grok-runtime`.
 
 The host needs `rg` (ripgrep) for the `list_files` and `search` tools. Shell
-execution also uses the host shell and is only enabled with `--allow-shell`.
+execution uses the host shell and is enabled by default.
 
 ## Configure
 
@@ -57,6 +57,10 @@ target/runtime-release/grok-runtime \
   --config runtime.toml \
   --prompt 'Inspect this project and fix the failing test'
 ```
+
+The agent keeps taking model/tool turns until the model returns a final response
+with no tool calls. There is no turn limit by default. Set `--max-turns N` (or
+`max_turns = N` in TOML) only when an explicit safety cap is desired.
 
 Without `--allow-write`, only `read_file`, `list_files`, and `search` are
 available alongside `web_search_runtime` and `bash`. `--allow-write` adds

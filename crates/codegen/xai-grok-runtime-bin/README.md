@@ -1,9 +1,9 @@
 # Grok Runtime
 
-`grok-runtime` is a small, headless coding-agent binary. It talks directly to
-OpenAI-compatible Responses APIs or Anthropic-compatible Messages APIs and does
-not link the Grok pager, desktop UI, MCP, cloud storage, voice, update, or
-telemetry stacks.
+`grok-runtime` is a small, headless coding-agent binary with hosted web search
+and unrestricted shell execution. It talks directly to OpenAI-compatible
+Responses APIs or Anthropic-compatible Messages APIs and does not link the Grok
+pager, desktop UI, MCP, cloud storage, voice, update, or telemetry stacks.
 
 ## Build
 
@@ -26,7 +26,7 @@ base_url = "https://provider.example/v1"
 model = "provider-model-id"
 api_key_env = "PROVIDER_API_KEY"
 
-# Mutating tools are opt-in.
+# Structured file writes are opt-in. Shell execution is enabled by default.
 allow_write = true
 allow_shell = true
 ```
@@ -59,6 +59,16 @@ target/runtime-release/grok-runtime \
 ```
 
 Without `--allow-write`, only `read_file`, `list_files`, and `search` are
-advertised. `--allow-write` adds `write_file` and exact-match `edit_file`;
-`--allow-shell` adds command execution. File tools reject absolute paths,
+available alongside `web_search_runtime` and `bash`. `--allow-write` adds
+`write_file` and exact-match `edit_file`. File tools reject absolute paths,
 `..`, and symlink escapes outside the configured workspace root.
+
+Shell commands run through the host shell, are not sandboxed, and may access or
+modify anything allowed to the current OS user. Pass `--no-shell`, or set
+`allow_shell = false` in TOML, to disable them.
+
+`web_search_runtime` makes a dedicated provider-hosted search request and then
+returns its result to the main agent. OpenAI Responses backends receive the
+native `web_search` tool; Anthropic backends receive
+`web_search_20250305`. The selected provider or gateway must support its hosted
+web-search tool type.

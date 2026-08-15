@@ -109,9 +109,13 @@ pub struct Cli {
     #[arg(long)]
     pub allow_write: bool,
 
-    /// Allow the model to run shell commands inside the workspace root.
-    #[arg(long)]
+    /// Enable shell execution (already the default unless disabled in TOML).
+    #[arg(long, conflicts_with = "no_shell")]
     pub allow_shell: bool,
+
+    /// Disable shell execution. Shell is enabled by default for this runtime.
+    #[arg(long, conflicts_with = "allow_shell")]
+    pub no_shell: bool,
 
     /// Maximum model/tool turns before stopping.
     #[arg(long)]
@@ -274,7 +278,13 @@ impl ResolvedInput {
                 env_headers,
                 cwd,
                 allow_write: cli.allow_write || file.allow_write.unwrap_or(false),
-                allow_shell: cli.allow_shell || file.allow_shell.unwrap_or(false),
+                allow_shell: if cli.no_shell {
+                    false
+                } else if cli.allow_shell {
+                    true
+                } else {
+                    file.allow_shell.unwrap_or(true)
+                },
                 max_turns,
                 max_output_tokens,
                 tool_timeout_secs,

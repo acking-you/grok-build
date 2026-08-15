@@ -1,9 +1,9 @@
 use anyhow::{Context, Result, bail};
 use xai_grok_sampler::SamplingClient;
-use xai_grok_sampling_types::{ConversationItem, ConversationRequest};
+use xai_grok_sampling_types::{ConversationItem, ConversationRequest, HostedTool, ToolCall};
 
 use crate::config::RuntimeConfig;
-use crate::tools::ToolRuntime;
+use crate::tools::{ToolRuntime, WEB_SEARCH_TOOL_NAME};
 
 pub struct AgentRuntime {
     client: SamplingClient,
@@ -71,7 +71,12 @@ impl AgentRuntime {
             for call in tool_calls {
                 tool_call_count = tool_call_count.saturating_add(1);
                 eprintln!("[tool] {}", call.name);
-                let result = self.tools.execute(&call).await;
+                let result = if call.name == WEB_SEARCH_TOOL_NAME {
+                    let search = self.run_web_search(&call).await;
+                    self.tools.format_result(search)
+                } else {
+                    self.tools.execute(&call).await
+                };
                 history.push(ConversationItem::tool_result(call.id.as_ref(), result));
             }
         }
@@ -82,12 +87,44 @@ impl AgentRuntime {
         )
     }
 
+    async fn run_web_search(&self, call: &ToolCall) -> Result<String> {
+        let query = self.tools.web_search_query(call)?;
+        let prompt = match self.config.backend {
+            crate::config::Backend::Anthropic => {
+                format!("Perform a web search for the query: {query}")
+            }
+            crate::config::Backend::Responses => format!(
+                "Search the web for the following query and return a concise answer with source URLs: {query}"
+            ),
+        };
+        let mut request = ConversationRequest::from_items(vec![ConversationItem::user(prompt)]);
+        request.hosted_tools = vec![HostedTool::WebSearch { options: None }];
+        request.max_output_tokens = Some(self.config.max_output_tokens);
+
+        let response = self
+            .client
+            .conversation_collect(request)
+            .await
+            .context("hosted web search failed")?;
+        let answer = response
+            .assistant()
+            .context("web search response did not contain an assistant item")?
+            .content
+            .trim()
+            .to_owned();
+        if answer.is_empty() {
+            bail!("web search returned no text result");
+        }
+        Ok(answer)
+    }
+
     fn system_prompt(&self) -> String {
         let mut prompt = format!(
             "You are a compact coding agent operating in the workspace {}. \
 Use the available tools to inspect the real files before answering. Keep edits focused, \
 preserve unrelated work, and report what you verified. Never claim a tool action succeeded \
-unless its result says so.",
+unless its result says so. Use web_search_runtime whenever the answer depends on current or \
+external information.",
             self.config.cwd.display()
         );
         if !self.config.allow_write {

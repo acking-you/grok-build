@@ -13,6 +13,24 @@ fn messages_test_request(reasoning_effort: Option<crate::ReasoningEffort>) -> Co
 }
 
 #[test]
+fn hosted_web_search_uses_anthropic_server_tool_shape() {
+    let mut req = ConversationRequest::from_items(vec![ConversationItem::user(
+        "Perform a web search for the query: current weather",
+    )]);
+    req.hosted_tools = vec![HostedTool::WebSearch { options: None }];
+
+    let json = serde_json::to_value(build_messages_request(&req)).unwrap();
+    assert_eq!(
+        json["tools"],
+        serde_json::json!([{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 8
+        }])
+    );
+}
+
+#[test]
 fn json_schema_and_reasoning_effort_are_orthogonal_in_output_config() {
     let schema = serde_json::json!({
         "type": "object",

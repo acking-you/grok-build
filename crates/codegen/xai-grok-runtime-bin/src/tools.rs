@@ -13,6 +13,8 @@ use tokio::time::timeout;
 use xai_grok_sampling_types::{ToolCall, ToolSpec};
 use xai_tty_utils::ProcessScope;
 
+pub(crate) const WEB_SEARCH_TOOL_NAME: &str = "web_search_runtime";
+
 pub(crate) struct ToolRuntime {
     root: PathBuf,
     allow_write: bool,
@@ -42,6 +44,16 @@ impl ToolRuntime {
 
     pub(crate) fn specs(&self) -> Vec<ToolSpec> {
         let mut specs = vec![
+            spec(
+                WEB_SEARCH_TOOL_NAME,
+                "Search the public web for current information. Use this for weather, news, recent facts, or whenever fresh sources are needed.",
+                json!({
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                    "required": ["query"],
+                    "additionalProperties": false
+                }),
+            ),
             spec(
                 "read_file",
                 "Read a UTF-8 text file inside the workspace with line numbers.",
@@ -128,10 +140,23 @@ impl ToolRuntime {
 
     pub(crate) async fn execute(&self, call: &ToolCall) -> String {
         let result = self.execute_inner(call).await;
+        self.format_result(result)
+    }
+
+    pub(crate) fn format_result(&self, result: Result<String>) -> String {
         match result {
             Ok(output) => truncate(&output, self.max_output_bytes),
             Err(error) => truncate(&format!("Error: {error:#}"), self.max_output_bytes),
         }
+    }
+
+    pub(crate) fn web_search_query(&self, call: &ToolCall) -> Result<String> {
+        let args: WebSearchArgs = parse(&call.arguments)?;
+        let query = args.query.trim();
+        if query.is_empty() {
+            bail!("web search query must not be empty");
+        }
+        Ok(query.to_owned())
     }
 
     async fn execute_inner(&self, call: &ToolCall) -> Result<String> {
@@ -480,6 +505,11 @@ struct SearchArgs {
 }
 
 #[derive(Deserialize)]
+struct WebSearchArgs {
+    query: String,
+}
+
+#[derive(Deserialize)]
 struct WriteFileArgs {
     path: String,
     content: String,
@@ -522,7 +552,10 @@ mod tests {
             .into_iter()
             .map(|spec| spec.name)
             .collect::<Vec<_>>();
-        assert_eq!(names, ["read_file", "list_files", "search"]);
+        assert_eq!(
+            names,
+            [WEB_SEARCH_TOOL_NAME, "read_file", "list_files", "search"]
+        );
 
         let enabled = ToolRuntime::new(root.path().to_owned(), true, true, 5, 4096);
         let names = enabled

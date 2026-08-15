@@ -15,9 +15,10 @@ fn mark_message_cache_breakpoint(msg: &mut crate::messages::Message) -> bool {
                     | ContentBlock::ToolResult { cache_control, .. }
                     | ContentBlock::Image { cache_control, .. }
                     | ContentBlock::ToolUse { cache_control, .. } => cache_control,
-                    ContentBlock::Thinking { .. } | ContentBlock::RedactedThinking { .. } => {
-                        continue;
-                    }
+                    ContentBlock::Thinking { .. }
+                    | ContentBlock::RedactedThinking { .. }
+                    | ContentBlock::ServerToolUse { .. }
+                    | ContentBlock::WebSearchToolResult { .. } => continue,
                 };
                 *cache_control = Some(CacheControl::ephemeral());
                 return true;
@@ -287,20 +288,29 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         Some(SystemParam::Blocks(system_blocks))
     };
 
-    let tools: Option<Vec<ToolParam>> = if req.tools.is_empty() {
-        None
-    } else {
-        Some(
-            req.tools
-                .iter()
-                .map(|t| ToolParam {
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                    input_schema: t.parameters.clone(),
-                })
-                .collect(),
-        )
-    };
+    let mut tools = req
+        .tools
+        .iter()
+        .map(|t| ToolParam {
+            tool_type: None,
+            name: t.name.clone(),
+            description: t.description.clone(),
+            max_uses: None,
+            input_schema: t.parameters.clone(),
+        })
+        .collect::<Vec<_>>();
+    tools.extend(req.hosted_tools.iter().filter_map(|tool| match tool {
+        HostedTool::WebSearch { .. } => Some(ToolParam {
+            tool_type: Some("web_search_20250305".into()),
+            name: "web_search".into(),
+            description: None,
+            max_uses: Some(8),
+            input_schema: serde_json::Value::Null,
+        }),
+        // Anthropic Messages has no x_search hosted-tool equivalent.
+        HostedTool::XSearch { .. } => None,
+    }));
+    let tools = (!tools.is_empty()).then_some(tools);
 
     let tool_choice: Option<ToolChoiceParam> = req.tool_choice.as_ref().map(|tc| match tc {
         ConversationToolChoice::Auto => ToolChoiceParam::Auto,

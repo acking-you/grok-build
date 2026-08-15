@@ -140,6 +140,21 @@ pub enum ContentBlock {
     RedactedThinking {
         data: String,
     },
+    /// Anthropic server-side tool invocation. These blocks are response-only;
+    /// the stream reducer ignores their JSON deltas while retaining adjacent
+    /// text blocks containing the provider's synthesized result.
+    ServerToolUse {
+        id: String,
+        name: String,
+        #[serde(default)]
+        input: serde_json::Value,
+    },
+    /// Result emitted by Anthropic's hosted web-search tool.
+    WebSearchToolResult {
+        tool_use_id: String,
+        #[serde(default)]
+        content: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,9 +174,14 @@ pub enum ToolResultContent {
 /// Tool definition (Anthropic Messages API format)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolParam {
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub tool_type: Option<String>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_uses: Option<u32>,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub input_schema: serde_json::Value,
 }
 
@@ -480,6 +500,33 @@ mod tests {
             serde_json::to_value(ContentBlock::RedactedThinking { data: "abc".into() }).unwrap();
         assert_eq!(json["type"], "redacted_thinking");
         assert_eq!(json["data"], "abc");
+    }
+
+    #[test]
+    fn hosted_web_search_content_blocks_deserialize() {
+        let server_tool: MessageStreamEvent = serde_json::from_str(
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}}"#,
+        )
+        .expect("server_tool_use must deserialize");
+        assert!(matches!(
+            server_tool,
+            MessageStreamEvent::ContentBlockStart {
+                content_block: ContentBlock::ServerToolUse { .. },
+                ..
+            }
+        ));
+
+        let result: MessageStreamEvent = serde_json::from_str(
+            r#"{"type":"content_block_start","index":2,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","title":"Weather","url":"https://example.test","encrypted_content":"sunny"}]}}"#,
+        )
+        .expect("web_search_tool_result must deserialize");
+        assert!(matches!(
+            result,
+            MessageStreamEvent::ContentBlockStart {
+                content_block: ContentBlock::WebSearchToolResult { .. },
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -48,6 +48,7 @@ members = [
     "crates/codegen/xai-grok-pager-render",
     "crates/codegen/xai-grok-paths",
     "crates/codegen/xai-grok-plugin-marketplace",
+    "crates/codegen/xai-grok-runtime-bin",
     "crates/codegen/xai-grok-sampler",
     "crates/codegen/xai-grok-sampling-types",
     "crates/codegen/xai-grok-sandbox",
@@ -383,6 +384,17 @@ codegen-units = 1
 strip = false
 debug = 1
 split-debuginfo = "off"
+
+# Small standalone Grok runtime. This profile deliberately optimizes for the
+# shipped binary rather than local link speed or post-build debug sidecars.
+[profile.runtime-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+debug = 0
+incremental = false
 
 # Production profile for latency-sensitive x-product services (VF, home-mixer).
 # Thin LTO gives ~90% of full LTO benefit at significantly faster link time.

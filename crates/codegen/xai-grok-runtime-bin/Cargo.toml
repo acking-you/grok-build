@@ -1,0 +1,34 @@
+[package]
+name = "xai-grok-runtime-bin"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Small headless Grok coding runtime for OpenAI Responses and Anthropic Messages APIs"
+
+[lib]
+name = "xai_grok_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "grok-runtime"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+dunce = { workspace = true }
+indexmap = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }
+toml = { workspace = true }
+xai-grok-sampler = { path = "../xai-grok-sampler" }
+xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
+xai-tty-utils = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+xai-grok-test-support = { workspace = true }
+
+[lints]
+workspace = true

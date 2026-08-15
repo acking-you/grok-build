@@ -13986,6 +13986,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-grok-runtime-bin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dunce",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "xai-grok-sampler",
+ "xai-grok-sampling-types",
+ "xai-grok-test-support",
+ "xai-tty-utils",
+]
+
+[[package]]
 name = "xai-grok-sampler"
 version = "0.1.0"
 dependencies = [
@@ -14026,7 +14045,7 @@ dependencies = [
  "tracing",
  "xai-circuit-breaker",
  "xai-grok-compaction",
- "xai-grok-tools",
+ "xai-tool-types",
 ]
 
 [[package]]

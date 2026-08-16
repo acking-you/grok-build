@@ -116,7 +116,7 @@ pub struct Cli {
     #[arg(long)]
     pub max_output_tokens: Option<u32>,
 
-    /// Maximum idle time between inference stream chunks (default: 300).
+    /// Maximum wait for an inference stream to start or produce more activity (default: 300).
     #[arg(long)]
     pub inference_idle_timeout_secs: Option<u64>,
 

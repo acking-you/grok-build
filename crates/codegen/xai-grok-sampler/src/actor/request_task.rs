@@ -2,7 +2,8 @@
 //!
 //! Spawned by the actor's `Submit` handler. Owns the retry loop and
 //! consumes a Layer 2 stream from the matching backend transform.
-//! Cancellation is cooperative via `CancellationToken`.
+//! Cancellation is cooperative via `CancellationToken`, including while the
+//! HTTP request is waiting for response headers and the SSE stream to start.
 
 use std::pin::pin;
 use std::sync::{
@@ -11,15 +12,17 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
+use futures_util::{FutureExt, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use xai_grok_sampling_types::{
-    ApiErrorCode, ConversationRequest, ConversationResponse, EmptyResponseContext, SamplingError,
-    SentCredential, error::Result as SamplingResult,
+    ApiErrorCode, ChatCompletionChunk, ConversationRequest, ConversationResponse,
+    EmptyResponseContext, ResponseModelMetadata, SamplingError, SentCredential,
+    error::Result as SamplingResult, messages, rs,
 };
 
 use crate::client::{ApiBackend, SamplingClient};
@@ -33,8 +36,9 @@ use crate::stream::responses::stream_responses_tracked;
 use crate::stream::{stream_chat_completions, stream_messages};
 use crate::types::RequestId;
 
-/// Default per-chunk idle timeout when neither config nor caller
-/// supplies one. Matches the shell's session-level default
+/// Default inference inactivity timeout when neither config nor caller supplies
+/// one. It covers both stream initialization and gaps between stream events.
+/// Matches the shell's session-level default
 /// (5 minutes -- long enough for cold-start reasoning, short enough
 /// to detect dead streams before the user gives up).
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
@@ -72,6 +76,25 @@ enum AttemptOutcome {
     /// Failed to construct the underlying raw stream (e.g., HTTP
     /// connect error before any chunks arrive).
     InitFailed { error: SamplingError },
+}
+
+/// Type-erased initialization result shared by all API backends. Keeping the
+/// pre-stream deadline on one concrete future avoids generating three copies of
+/// the timeout/cancellation state machine in the size-sensitive runtime.
+enum InitializedStream {
+    ChatCompletions {
+        raw: BoxStream<'static, SamplingResult<ChatCompletionChunk>>,
+        metadata: Option<ResponseModelMetadata>,
+    },
+    Responses {
+        raw: BoxStream<'static, SamplingResult<rs::ResponseStreamEvent>>,
+        metadata: Option<ResponseModelMetadata>,
+        doom_loop: Option<crate::doom_loop::DoomLoopSignalCollector>,
+    },
+    Messages {
+        raw: BoxStream<'static, SamplingResult<messages::MessageStreamEvent>>,
+        metadata: Option<ResponseModelMetadata>,
+    },
 }
 
 /// Run a single sampling request to completion (or final failure).
@@ -528,12 +551,38 @@ async fn run_one_attempt(
     doom_check: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
     output_observed: Arc<AtomicBool>,
 ) -> AttemptOutcome {
-    match client.api_backend() {
-        ApiBackend::ChatCompletions => {
-            let (raw, metadata) = match client.conversation_stream(request).await {
-                Ok(pair) => pair,
-                Err(e) => return AttemptOutcome::InitFailed { error: e },
-            };
+    let initialization: BoxFuture<'_, SamplingResult<InitializedStream>> = match client
+        .api_backend()
+    {
+        ApiBackend::ChatCompletions => async move {
+            let (raw, metadata) = client.conversation_stream(request).await?;
+            Ok(InitializedStream::ChatCompletions { raw, metadata })
+        }
+        .boxed(),
+        ApiBackend::Responses => async move {
+            let (raw, metadata, doom_loop) = client.conversation_stream_responses(request).await?;
+            Ok(InitializedStream::Responses {
+                raw,
+                metadata,
+                doom_loop,
+            })
+        }
+        .boxed(),
+        ApiBackend::Messages => async move {
+            let (raw, metadata) = client.conversation_stream_messages(request).await?;
+            Ok(InitializedStream::Messages { raw, metadata })
+        }
+        .boxed(),
+    };
+
+    let initialized =
+        match await_stream_initialization(initialization, idle_timeout, cancel_token).await {
+            Ok(initialized) => initialized,
+            Err(outcome) => return outcome,
+        };
+
+    match initialized {
+        InitializedStream::ChatCompletions { raw, metadata } => {
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_chat_completions(teed, metadata, request_id.clone(), idle_timeout);
             drive_l2(
@@ -547,12 +596,11 @@ async fn run_one_attempt(
             )
             .await
         }
-        ApiBackend::Responses => {
-            let (raw, metadata, doom_loop) =
-                match client.conversation_stream_responses(request).await {
-                    Ok(parts) => parts,
-                    Err(e) => return AttemptOutcome::InitFailed { error: e },
-                };
+        InitializedStream::Responses {
+            raw,
+            metadata,
+            doom_loop,
+        } => {
             if doom_check.is_none()
                 && let Some(collector) = &doom_loop
             {
@@ -578,11 +626,7 @@ async fn run_one_attempt(
             )
             .await
         }
-        ApiBackend::Messages => {
-            let (raw, metadata) = match client.conversation_stream_messages(request).await {
-                Ok(pair) => pair,
-                Err(e) => return AttemptOutcome::InitFailed { error: e },
-            };
+        InitializedStream::Messages { raw, metadata } => {
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_messages(teed, metadata, request_id.clone(), idle_timeout);
             drive_l2(
@@ -596,6 +640,31 @@ async fn run_one_attempt(
             )
             .await
         }
+    }
+}
+
+/// Wait for the provider to return response headers and construct its raw
+/// streaming body. The L2 stream transforms enforce the same idle deadline once
+/// this succeeds; keeping the initialization wait here closes the pre-stream
+/// gap where a connected proxy could otherwise hold a request open forever.
+///
+/// Dropping `future` on either branch also drops the in-flight reqwest future,
+/// so cancellation tears down the provider request instead of merely detaching
+/// it from the foreground turn.
+async fn await_stream_initialization(
+    future: BoxFuture<'_, SamplingResult<InitializedStream>>,
+    idle_timeout: Duration,
+    cancel_token: &CancellationToken,
+) -> Result<InitializedStream, AttemptOutcome> {
+    match tokio::time::timeout(idle_timeout, cancel_token.run_until_cancelled(future)).await {
+        Ok(Some(Ok(value))) => Ok(value),
+        Ok(Some(Err(error))) => Err(AttemptOutcome::InitFailed { error }),
+        Ok(None) => Err(AttemptOutcome::Cancelled),
+        Err(_elapsed) => Err(AttemptOutcome::InitFailed {
+            error: SamplingError::IdleTimeout {
+                elapsed_secs: idle_timeout.as_secs(),
+            },
+        }),
     }
 }
 
@@ -919,6 +988,62 @@ mod tests {
     use super::*;
     use futures_util::stream;
     use xai_grok_sampling_types::ApiErrorCode;
+
+    struct DropMarker(Arc<AtomicBool>);
+
+    impl Drop for DropMarker {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_initialization_timeout_drops_in_flight_request() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let marker = DropMarker(Arc::clone(&dropped));
+        let future: BoxFuture<'_, SamplingResult<InitializedStream>> = async move {
+            let _marker = marker;
+            std::future::pending::<SamplingResult<InitializedStream>>().await
+        }
+        .boxed();
+        let cancel_token = CancellationToken::new();
+
+        let outcome =
+            await_stream_initialization(future, Duration::from_secs(17), &cancel_token).await;
+
+        match outcome {
+            Err(AttemptOutcome::InitFailed {
+                error: SamplingError::IdleTimeout { elapsed_secs },
+            }) => assert_eq!(elapsed_secs, 17),
+            _ => panic!("expected stream initialization idle timeout"),
+        }
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "timing out must drop the provider request future"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_initialization_cancellation_drops_in_flight_request() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let marker = DropMarker(Arc::clone(&dropped));
+        let future: BoxFuture<'_, SamplingResult<InitializedStream>> = async move {
+            let _marker = marker;
+            std::future::pending::<SamplingResult<InitializedStream>>().await
+        }
+        .boxed();
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+
+        let outcome =
+            await_stream_initialization(future, Duration::from_secs(300), &cancel_token).await;
+
+        assert!(matches!(outcome, Err(AttemptOutcome::Cancelled)));
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "cancelling must drop the provider request future"
+        );
+    }
 
     #[test]
     fn synthesize_idle_timeout_extracts_elapsed_secs() {

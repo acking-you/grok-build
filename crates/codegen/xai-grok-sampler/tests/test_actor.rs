@@ -267,6 +267,99 @@ async fn submit_and_collect_returns_response() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stream_initialization_timeout_covers_all_backends() {
+    async fn never_send_response_headers() -> StatusCode {
+        std::future::pending::<()>().await;
+        StatusCode::OK
+    }
+
+    let app = Router::new()
+        .route("/v1/chat/completions", post(never_send_response_headers))
+        .route("/v1/responses", post(never_send_response_headers))
+        .route("/v1/messages", post(never_send_response_headers));
+    let server = MockServer::spawn(app).await;
+
+    for (backend, request_id) in [
+        (ApiBackend::ChatCompletions, "req-init-timeout-chat"),
+        (ApiBackend::Responses, "req-init-timeout-responses"),
+        (ApiBackend::Messages, "req-init-timeout-messages"),
+    ] {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let mut cfg = test_config(server.base_url(), "test-model");
+        cfg.api_backend = backend.clone();
+        cfg.idle_timeout_secs = Some(1);
+        cfg.max_retries = Some(0);
+        let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+        handle.submit(RequestId::from(request_id), user_request("hi"));
+        let events = drain_until_terminal(&mut event_rx, Duration::from_secs(3)).await;
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(SamplingEvent::Failed { error, .. })
+                    if error.kind == SamplingErrorKind::IdleTimeout
+            ),
+            "{backend:?} must time out while waiting for response headers: {events:?}"
+        );
+        assert_eq!(handle.active_count().await, 0);
+    }
+
+    server.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_while_waiting_for_response_headers_terminates_task() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let entered_handler = Arc::clone(&entered);
+    let app = Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let entered = Arc::clone(&entered_handler);
+            async move {
+                entered.notify_one();
+                std::future::pending::<()>().await;
+                StatusCode::OK
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut cfg = test_config(server.base_url(), "test-model");
+    cfg.api_backend = ApiBackend::Messages;
+    cfg.idle_timeout_secs = Some(300);
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    let rid = RequestId::from("req-cancel-before-headers");
+    handle.submit(rid.clone(), user_request("hi"));
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("request reached the hanging handler");
+
+    handle.cancel(rid);
+    let failed = await_event_matching(
+        &mut event_rx,
+        |event| matches!(event, SamplingEvent::Failed { .. }),
+        Duration::from_secs(2),
+    )
+    .await
+    .expect("cancellation must not wait for the provider timeout");
+
+    assert!(matches!(
+        failed,
+        SamplingEvent::Failed { error, .. } if error.message.contains("cancelled")
+    ));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while handle.active_count().await != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelled pre-stream request must leave the active set");
+    server.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_in_flight_request_terminates_task() {
     // Server that yields one chunk then hangs.
     let app = Router::new().route(

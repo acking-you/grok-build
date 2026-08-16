@@ -660,12 +660,12 @@ mod tests {
         let formatted = format_request_failure(
             None,
             Some("idle_timeout"),
-            "inference idle timeout after 90s with no chunks",
+            "inference idle timeout after 90s with no response activity",
         );
         assert_eq!(formatted.status, None);
         assert_eq!(
             formatted.message(),
-            "No response from the model \u{2014} inference idle timeout after 90s with no chunks. \
+            "No response from the model \u{2014} inference idle timeout after 90s with no response activity. \
              Try sending again."
         );
     }

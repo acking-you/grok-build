@@ -166,6 +166,8 @@ pub(crate) fn stream_responses_tracked<'a>(
 
         let mut stream = raw_stream;
         loop {
+            // Stream initialization is guarded by the same deadline in
+            // `request_task`; this covers subsequent SSE inactivity.
             let event_result = match tokio::time::timeout(idle_timeout, stream.next()).await {
                 Ok(Some(event_result)) => event_result,
                 Ok(None) => break,

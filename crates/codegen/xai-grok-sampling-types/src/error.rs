@@ -186,10 +186,11 @@ pub enum SamplingError {
         /// The stream error envelope's `code` slot, when present.
         code: Option<ApiErrorCode>,
     },
-    /// Per-chunk idle timeout — no SSE chunk received from the model within the
-    /// configured deadline. NOT retryable: the model (or network path) is stuck,
-    /// and replaying the same request would likely stall again.
-    #[error("inference idle timeout after {elapsed_secs}s with no chunks")]
+    /// Inference inactivity timeout — either the response stream did not start
+    /// or no SSE activity arrived within the configured deadline. NOT retryable:
+    /// the model (or network path) is stuck, and replaying the same request would
+    /// likely stall again.
+    #[error("inference idle timeout after {elapsed_secs}s with no response activity")]
     IdleTimeout { elapsed_secs: u64 },
     #[error("empty response from model ({})", context.reason)]
     EmptyResponse { context: EmptyResponseContext },

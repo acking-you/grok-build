@@ -15,19 +15,14 @@ agent loop.
 ## Build
 
 ```sh
-CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C force-unwind-tables=no -C llvm-args=-enable-machine-outliner=always -C llvm-args=-enable-merge-functions' \
-  cargo build --profile runtime-release \
+cargo build --profile runtime-release \
   -p xai-grok-runtime-bin \
   --bin grok-runtime
-
-strip --strip-section-headers target/runtime-release/grok-runtime
 ```
 
-The binary is written to `target/runtime-release/grok-runtime`. The extra flags
-are stable-toolchain size optimizations for the native x86-64 Linux release;
-omit them when building for another target. The final `strip` removes only the
-ELF section table, which the Linux loader does not use, and keeps the packaged
-artifact strictly below 50,000,000 bytes with the current dependency graph.
+The binary is written to `target/runtime-release/grok-runtime` (with the normal
+platform-specific executable suffix, if any). The `runtime-release` profile is
+portable; it does not require a specific linker or target-only post-processing.
 
 ## Serve an Anthropic-compatible model
 
@@ -113,5 +108,6 @@ extra_headers = { "anthropic-version" = "2023-06-01" }
 
 Use `--disable-backend-search` to stop advertising provider-hosted search for
 the configured model, or `--disable-web-search` to disable all Grok web-search
-tools. `--inference-idle-timeout-secs` is a per-stream-chunk deadline: a stalled
-provider request returns an error to the agent instead of blocking forever.
+tools. `--inference-idle-timeout-secs` bounds both the wait for response headers
+and gaps between stream events, so a stalled provider request returns an error
+to the agent instead of blocking forever.

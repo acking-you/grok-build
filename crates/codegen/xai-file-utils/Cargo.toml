@@ -12,15 +12,15 @@ base64.workspace = true
 dunce = { workspace = true }
 xai-circuit-breaker = { workspace = true }
 xai-grok-version = { workspace = true }
-aws-sdk-s3 = { version = "1", default-features = false, features = [
+aws-sdk-s3 = { version = "1", default-features = false, optional = true, features = [
     "rt-tokio",
 ] }
-aws-config = { version = "1", default-features = false, features = [
+aws-config = { version = "1", default-features = false, optional = true, features = [
     "rt-tokio",
     "sso",
     "credentials-process",
 ] }
-aws-smithy-http-client = { version = "1", features = ["rustls-ring"] }
+aws-smithy-http-client = { version = "1", optional = true, features = ["rustls-ring"] }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -35,7 +35,7 @@ sha2 = { workspace = true, features = ["force-soft"] }
 xai-grok-auth = { path = "../xai-grok-auth", features = ["middleware"] }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 async-compression = { workspace = true, features = ["tokio"] }
-gcloud-storage = { workspace = true }
+gcloud-storage = { workspace = true, optional = true }
 opentelemetry = { workspace = true }
 reflink-copy = { workspace = true }
 tracing-opentelemetry = { workspace = true }
@@ -46,6 +46,13 @@ zstd.workspace = true
 
 
 [features]
+default = ["cloud-storage"]
+cloud-storage = [
+    "dep:aws-config",
+    "dep:aws-sdk-s3",
+    "dep:aws-smithy-http-client",
+    "dep:gcloud-storage",
+]
 default-bazel = []
 
 

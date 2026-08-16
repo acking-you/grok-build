@@ -18,6 +18,10 @@ pub fn with_auth_retry(
 }
 pub mod gcs;
 pub mod queue;
+#[cfg(feature = "cloud-storage")]
+pub mod s3;
+#[cfg(not(feature = "cloud-storage"))]
+#[path = "s3_stub.rs"]
 pub mod s3;
 pub mod storage_client;
 pub mod trace_context;

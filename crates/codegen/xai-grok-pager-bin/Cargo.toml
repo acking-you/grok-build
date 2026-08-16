@@ -25,7 +25,7 @@ xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal" }
 xai-grok-shell = { workspace = true }
 xai-grok-update = { path = "../xai-grok-update" }
 xai-grok-version = { workspace = true }
-xai-grok-telemetry = { workspace = true }
+xai-grok-telemetry = { workspace = true, features = ["sentry", "telemetry-exporters"] }
 xai-grok-workspace = { workspace = true }
 xai-crash-handler = { path = "../xai-crash-handler" }
 xai-acp-lib = { workspace = true }
@@ -82,7 +82,12 @@ tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats", "u
 serial_test = { workspace = true }
 # `PagerArgs::try_parse_from` in the CLI-parsing unit tests (needs the
 # `clap::Parser` trait in scope).
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = [
+  "color",
+  "derive",
+  "error-context",
+  "suggestions",
+] }
 tempfile = { workspace = true }
 
 [features]

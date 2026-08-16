@@ -6,12 +6,17 @@ edition.workspace = true
 description = "Foundation modules for the grok shell crate family: environment presets, CPU profiling, and process/filesystem utilities."
 
 [features]
+default = ["cpu-profile"]
 # Forwarded from shell; empty here (no local-ws code in this crate).
 local-workspace = []
+# Unix sampling profiler used by the interactive/leader diagnostic surface.
+# The standalone serve runtime keeps the same protocol and reports this
+# optional diagnostic capability as unsupported.
+cpu-profile = ["dep:pprof"]
 # Exposes `#[cfg(test)]`-only helpers (`env::EnvVarGuard`,
 # `cpu_profile` test seams) to downstream crates' test targets. Enabled by
 test-support = ["xai-grok-env/test-support"]
-default-bazel = ["test-support"]
+default-bazel = ["test-support", "cpu-profile"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -35,7 +40,7 @@ nix = { workspace = true }
 # No `flamegraph` feature: that pulls in inferno (CDDL-1.0), which we keep out
 # of shipped binaries. stop() emits folded stacks via pprof's public Report
 # API instead; render externally with speedscope or inferno-flamegraph.
-pprof = { workspace = true }
+pprof = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }

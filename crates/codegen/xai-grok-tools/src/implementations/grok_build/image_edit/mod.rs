@@ -12,9 +12,11 @@
 //! Shares the same [`ImageGenClient`] and session credentials as
 //! `image_gen` — no additional configuration is needed.
 
+#[cfg(feature = "image-codecs")]
 use std::io::Cursor;
 
 use base64::Engine as _;
+#[cfg(feature = "image-codecs")]
 use image::ImageReader;
 use reqwest::header::AUTHORIZATION;
 
@@ -24,16 +26,22 @@ use crate::types::output::{MediaGenOutput, ToolOutput};
 use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::resources::SessionFolder;
 use crate::types::tool::{ToolKind, ToolNamespace};
+#[cfg(feature = "image-codecs")]
 use crate::util::image_compress::{FilterType, ReEncodeParams, re_encode_under_limit};
 
 pub(crate) const XAI_IMAGINE_EDIT_MODEL: &str = "grok-imagine-image-quality";
 
 /// Size/dimension limits for reference images sent to the Imagine API.
 /// Tighter than the vision path; the backend returns 400 when exceeded.
+#[cfg(feature = "image-codecs")]
 const MAX_REF_RAW_BYTES: usize = 400 * 1024;
+#[cfg(feature = "image-codecs")]
 const MAX_REF_DIMENSION: u32 = 768;
+#[cfg(feature = "image-codecs")]
 const MIN_REF_DIMENSION: u32 = 256;
+#[cfg(feature = "image-codecs")]
 const REF_QUALITY_STEPS: &[u8] = &[80, 65, 50, 35];
+#[cfg(feature = "image-codecs")]
 const MAX_REF_DECODE_PIXELS: u64 = 12_000_000;
 
 pub const IMAGE_EDIT_TOOL_NAME: &str = "image_edit";
@@ -45,6 +53,7 @@ pub const IMAGE_EDIT_TOOL_NAME: &str = "image_edit";
 /// Compress a reference image to fit within Imagine API limits.
 ///
 /// Returns `(bytes, mime)`. Small JPEG/PNG inputs pass through unchanged.
+#[cfg(feature = "image-codecs")]
 fn compress_reference(
     raw_bytes: Vec<u8>,
 ) -> Result<(Vec<u8>, &'static str), xai_tool_runtime::ToolError> {
@@ -103,6 +112,15 @@ fn compress_reference(
     })?;
 
     Ok((buf, mime))
+}
+
+#[cfg(not(feature = "image-codecs"))]
+fn compress_reference(
+    _raw_bytes: Vec<u8>,
+) -> Result<(Vec<u8>, &'static str), xai_tool_runtime::ToolError> {
+    Err(xai_tool_runtime::ToolError::invalid_arguments(
+        "image editing is unavailable in this serve-runtime build",
+    ))
 }
 
 // ---------------------------------------------------------------------------

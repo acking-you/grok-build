@@ -32,15 +32,15 @@ crc32fast = { workspace = true }
 ignore = { workspace = true }
 infer = { workspace = true }
 globset = { workspace = true }
-image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
+image = { workspace = true, optional = true }
 kamadak-exif = { workspace = true, optional = true }
-pdf_oxide = { workspace = true }
+pdf_oxide = { workspace = true, optional = true }
 # PPTX text extraction (implementations/read_file/pptx.rs). Deliberately NOT
 # `workspace = true`: the workspace `zip` pin has default features on, which
 # drag aes/bzip2/lzma/zstd into the shipped pager binary. PPTX entries are
 # only ever stored or deflated.
-zip = { version = "3", default-features = false, features = ["deflate-flate2"] }
-quick-xml = { workspace = true }
+zip = { version = "3", default-features = false, optional = true, features = ["deflate-flate2"] }
+quick-xml = { workspace = true, optional = true }
 indexmap = { workspace = true, features = ["serde"] }
 minijinja = { version = "2", features = ["custom_syntax"] }
 parking_lot = { workspace = true }
@@ -89,7 +89,7 @@ which = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
-xai-file-utils = { path = "../xai-file-utils" }
+xai-file-utils = { path = "../xai-file-utils", default-features = false }
 dhat = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
@@ -125,6 +125,13 @@ workspace = true
 
 [features]
 default-bazel = ["serde"]
-default = ["serde"]
+default = ["serde", "pdf", "pptx", "cloud-storage", "image-codecs", "extended-images"]
 serde = []
+pdf = ["dep:pdf_oxide"]
+pptx = ["dep:quick-xml", "dep:zip"]
+cloud-storage = ["xai-file-utils/cloud-storage"]
+image-codecs = ["dep:image", "image/png", "image/jpeg"]
+extended-images = ["image/bmp", "image/gif", "image/ico", "image/tiff", "image/webp"]
 dhat-heap = ["dep:dhat"]
+# Marks the small ACP artifact without changing the original tool behavior.
+serve-runtime = []

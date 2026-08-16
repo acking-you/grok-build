@@ -326,6 +326,10 @@ pub(crate) mod goal_summarizer;
 pub mod goal_tracker;
 pub mod helpers;
 pub(crate) mod image_describe;
+#[cfg(feature = "image-codecs")]
+pub(crate) mod image_normalize;
+#[cfg(not(feature = "image-codecs"))]
+#[path = "image_normalize_stub.rs"]
 pub(crate) mod image_normalize;
 pub(crate) mod inference_metrics;
 pub use xai_grok_shared::session::info;

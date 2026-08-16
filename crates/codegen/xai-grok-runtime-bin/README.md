@@ -1,93 +1,117 @@
 # Grok Runtime
 
-`grok-runtime` is a small, headless coding-agent binary with hosted web search
-and unrestricted shell execution. It talks directly to OpenAI-compatible
-Responses APIs or Anthropic-compatible Messages APIs and does not link the Grok
-pager, desktop UI, MCP, cloud storage, voice, update, or telemetry stacks.
+`grok-runtime` is the original Grok Build agent exposed as an authenticated ACP
+WebSocket service. The binary links `xai-grok-shell` directly and does not link
+the pager/TUI crates. Its dependency features also leave UI-only clipboard,
+crash reporting and CPU profiling, native cloud uploads, PDF/PPTX readers, and
+raster-image decoding/compression out of this artifact. Normal Grok Build
+binaries retain all of those optional capabilities.
+
+This keeps the original session lifecycle, persistence and resume support,
+automatic compaction, Todo/Task orchestration, subagents, web search, MCP, and
+background shell-command handling. The runtime does not implement a second
+agent loop.
 
 ## Build
 
 ```sh
-cargo build -p xai-grok-runtime-bin --profile runtime-release
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C force-unwind-tables=no -C llvm-args=-enable-machine-outliner=always -C llvm-args=-enable-merge-functions' \
+  cargo build --profile runtime-release \
+  -p xai-grok-runtime-bin \
+  --bin grok-runtime
+
+strip --strip-section-headers target/runtime-release/grok-runtime
 ```
 
-The binary is written to `target/runtime-release/grok-runtime`.
+The binary is written to `target/runtime-release/grok-runtime`. The extra flags
+are stable-toolchain size optimizations for the native x86-64 Linux release;
+omit them when building for another target. The final `strip` removes only the
+ELF section table, which the Linux loader does not use, and keeps the packaged
+artifact strictly below 50,000,000 bytes with the current dependency graph.
 
-The host needs `rg` (ripgrep) for the `list_files` and `search` tools. Shell
-execution uses the host shell and is enabled by default.
+## Serve an Anthropic-compatible model
 
-## Configure
-
-Create `runtime.toml` for an OpenAI-compatible Responses provider:
-
-```toml
-backend = "responses"
-base_url = "https://provider.example/v1"
-model = "provider-model-id"
-api_key_env = "PROVIDER_API_KEY"
-
-# Structured file writes are opt-in. Shell execution is enabled by default.
-allow_write = true
-allow_shell = true
-```
-
-For an Anthropic-compatible Messages provider:
-
-```toml
-backend = "anthropic"
-base_url = "https://provider.example/v1"
-model = "provider-model-id"
-api_key_env = "ANTHROPIC_API_KEY"
-auth_scheme = "x_api_key"
-
-[headers]
-anthropic-version = "2023-06-01"
-```
-
-Secrets are read from the configured environment variable and are not stored in
-the TOML file. `GROK_RUNTIME_API_KEY` can be used as a provider-independent
-override. Gateways that expect bearer authentication can set
-`auth_scheme = "bearer"`.
-
-## Run
+Keep the provider credential in the environment. For a gateway that accepts a
+bearer token while speaking the Anthropic Messages protocol:
 
 ```sh
-export PROVIDER_API_KEY='...'
-target/runtime-release/grok-runtime \
-  --config runtime.toml \
-  --prompt 'Inspect this project and fix the failing test'
+export GROK_RUNTIME_API_KEY='replace-me'
+
+./target/runtime-release/grok-runtime \
+  --backend anthropic \
+  --base-url http://127.0.0.1:19182/api/kiro-gateway/v1 \
+  --model claude-sonnet-5 \
+  --auth-scheme bearer \
+  --header anthropic-version=2023-06-01 \
+  --yolo \
+  --secret change-this-server-secret
 ```
 
-The agent keeps taking model/tool turns until the model returns a final response
-with no tool calls. There is no turn limit by default. Set `--max-turns N` (or
-`max_turns = N` in TOML) only when an explicit safety cap is desired.
+Native Anthropic endpoints normally use `--auth-scheme x-api-key`, which is the
+default for `--backend anthropic`.
 
-Without `--allow-write`, only `read_file`, `list_files`, and `search` are
-available alongside `web_search_runtime` and `bash`. `--allow-write` adds
-`write_file` and exact-match `edit_file`. File tools reject absolute paths,
-`..`, and symlink escapes outside the configured workspace root.
+## Serve an OpenAI Responses-compatible model
 
-Shell commands run through the host shell, are not sandboxed, and may access or
-modify anything allowed to the current OS user. Pass `--no-shell`, or set
-`allow_shell = false` in TOML, to disable them.
+```sh
+export GROK_RUNTIME_API_KEY='replace-me'
 
-`web_search_runtime` makes a dedicated provider-hosted search request and then
-returns its result to the main agent. OpenAI Responses backends receive the
-native `web_search` tool; Anthropic backends receive
-`web_search_20250305`. The selected provider or gateway must support its hosted
-web-search tool type.
+./target/runtime-release/grok-runtime \
+  --backend responses \
+  --base-url https://provider.example/v1 \
+  --model provider-model-id \
+  --auth-scheme bearer \
+  --yolo \
+  --secret change-this-server-secret
+```
 
-Each tool invocation emits a detailed start line with its call id and concrete
-arguments (workspace path, line range, query, command, or bounded edit/write
-preview), followed by a completion line with status, elapsed time, output size,
-and a bounded result preview.
+`GROK_RUNTIME_API_KEY` takes precedence. `--api-key-env NAME` selects another
+environment variable without writing the credential to disk.
 
-Model requests emit matching `model:start`, `model:done`, or `model:error`
-events so slow providers remain observable. Every inference and hosted-search
-request has a 120-second total timeout by default; change it with
-`--inference-timeout-secs` or `inference_timeout_secs` in TOML.
+## Connect
 
-The default output cap is 8192 tokens for Responses and 4096 for Anthropic.
-The lower Anthropic default avoids providers that stall before the first stream
-event when asked for an 8192-token tool-use turn; either value can be overridden
-with `--max-output-tokens` or `max_output_tokens` in TOML.
+The default endpoint is `ws://127.0.0.1:2419/ws`. Authenticate with either an
+`Authorization: Bearer <server-secret>` header or the query parameter:
+
+```text
+ws://127.0.0.1:2419/ws?server-key=<server-secret>
+```
+
+The connection speaks the standard ACP JSON-RPC lifecycle: `initialize`, then
+`session/new` or `session/load`, followed by `session/prompt`. Session updates
+include the original detailed tool-call events. The process keeps its agent and
+in-flight work alive across client reconnects.
+
+`--yolo` is intended for trusted automation. Without it, the ACP client must
+answer permission requests. Shell commands are executed by Grok Build's own
+tool runtime and can access anything available to the OS user; deny rules and
+hooks from the effective Grok configuration still apply.
+
+## Native Grok configuration
+
+`--config PATH` accepts a normal Grok Build TOML overlay and merges it over the
+effective user configuration. Provider flags are only a convenience for one
+runtime model; omit `--backend` to use models already declared in Grok config.
+
+Equivalent model configuration looks like:
+
+```toml
+[models]
+default = "gateway-claude"
+
+[model.gateway-claude]
+model = "claude-sonnet-5"
+base_url = "http://127.0.0.1:19182/api/kiro-gateway/v1"
+api_backend = "messages"
+auth_scheme = "bearer"
+env_key = "GROK_RUNTIME_API_KEY"
+context_window = 200000
+max_completion_tokens = 4096
+inference_idle_timeout_secs = 300
+supports_backend_search = true
+extra_headers = { "anthropic-version" = "2023-06-01" }
+```
+
+Use `--disable-backend-search` to stop advertising provider-hosted search for
+the configured model, or `--disable-web-search` to disable all Grok web-search
+tools. `--inference-idle-timeout-secs` is a per-stream-chunk deadline: a stalled
+provider request returns an error to the agent instead of blocking forever.

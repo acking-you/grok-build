@@ -1,6 +1,6 @@
 use std::fs;
 // OpenOptions is only used by the Unix-only profiler implementation.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "cpu-profile"))]
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
@@ -556,7 +556,7 @@ impl CpuProfileManager {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "cpu-profile"))]
 mod platform {
     use std::fmt::Write as _;
     use std::io::Write as _;
@@ -687,7 +687,7 @@ mod platform {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(all(unix, feature = "cpu-profile")))]
 mod platform {
     use super::*;
 

@@ -3,13 +3,19 @@ license = "Apache-2.0"
 name = "xai-grok-shared"
 edition.workspace = true
 
+[features]
+default = ["clipboard", "extended-images"]
+clipboard = ["dep:arboard", "dep:objc2", "dep:wl-clipboard-rs", "image-codecs"]
+image-codecs = ["dep:image", "image/png", "image/jpeg"]
+extended-images = ["image/gif", "image/webp"]
+
 [dependencies]
 agent-client-protocol = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }
 dirs = "6"
 dunce = { workspace = true }
-image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
+image = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 regex = { workspace = true }
@@ -36,7 +42,7 @@ libc = { workspace = true }
 # load it — preserving the no-AppKit-link rule in clipboard.rs. Version
 # matches the workspace lock.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6.3"
+objc2 = { version = "0.6.3", optional = true }
 
 # arboard for clipboard on non-macOS platforms. On macOS we use pbcopy/pbpaste
 # subprocesses to avoid linking AppKit, which causes ~2 GB IOAccelerator GPU
@@ -45,12 +51,12 @@ objc2 = "0.6.3"
 # compositor-side data-control protocol (no surface, no focus) instead of the
 # focus-mediated XWayland bridge; no-op off Linux (target-gated inside arboard).
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-arboard = { workspace = true, features = ["wayland-data-control"] }
+arboard = { workspace = true, optional = true, features = ["wayland-data-control"] }
 
 # Already in-graph via arboard's wayland-data-control; direct dep for the
 # data-control probe in clipboard.rs (`is_primary_selection_supported`).
 [target.'cfg(target_os = "linux")'.dependencies]
-wl-clipboard-rs = { workspace = true }
+wl-clipboard-rs = { workspace = true, optional = true }
 
 [lints]
 workspace = true

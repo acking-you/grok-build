@@ -4,9 +4,11 @@
 //! tool image path use this to compress images under a byte-size cap while
 //! respecting per-caller dimension and quality parameters.
 
+#[cfg(feature = "image-codecs")]
 use std::borrow::Cow;
 
 use image::DynamicImage;
+#[cfg(feature = "image-codecs")]
 use image::codecs::jpeg::JpegEncoder;
 pub use image::imageops::FilterType;
 
@@ -62,6 +64,7 @@ pub enum ReEncodeError {
 /// is smallest and fits under `params.max_bytes`.
 ///
 /// On success returns `(bytes, width, height, mime_type)`.
+#[cfg(feature = "image-codecs")]
 pub fn re_encode_under_limit(
     decoded: &DynamicImage,
     params: &ReEncodeParams,
@@ -134,7 +137,19 @@ pub fn re_encode_under_limit(
     }
 }
 
+#[cfg(not(feature = "image-codecs"))]
+pub fn re_encode_under_limit(
+    decoded: &DynamicImage,
+    params: &ReEncodeParams,
+) -> Result<(Vec<u8>, u32, u32, &'static str), ReEncodeError> {
+    Err(ReEncodeError::CouldNotFit {
+        max_bytes: params.max_bytes,
+        last_side: decoded.width().max(decoded.height()),
+    })
+}
+
 /// Largest target long side whose resize output area stays within `max_pixels`.
+#[cfg(feature = "image-codecs")]
 fn area_capped_side(long: u32, short: u32, max_pixels: u64) -> u32 {
     let scale = (max_pixels as f64 / (u64::from(long) * u64::from(short)) as f64).sqrt();
     let mut side = ((f64::from(long) * scale).floor() as u32).clamp(1, long);
@@ -154,6 +169,7 @@ fn area_capped_side(long: u32, short: u32, max_pixels: u64) -> u32 {
 /// expression-for-expression; the `area_cap_exact_fit_across_aspect_ratios`
 /// sweep pins the equivalence through the real resize, so a crate bump that
 /// changes the rounding shows up as a test failure pointing here.
+#[cfg(feature = "image-codecs")]
 fn predicted_resize_area(long: u32, short: u32, side: u32) -> u64 {
     let ratio = f64::from(side) / f64::from(long);
     let scaled_long = (f64::from(long) * ratio).round().max(1.0) as u64;
@@ -161,7 +177,7 @@ fn predicted_resize_area(long: u32, short: u32, side: u32) -> u64 {
     scaled_long * scaled_short
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "image-codecs"))]
 mod tests {
     use image::{DynamicImage, Rgb, RgbImage};
 

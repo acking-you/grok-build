@@ -6,7 +6,15 @@ pub mod fs;
 pub mod git_detect;
 pub mod grok_home;
 pub mod hash;
+#[cfg(feature = "image-codecs")]
 pub mod image_compress;
+#[cfg(not(feature = "image-codecs"))]
+#[path = "image_compress_stub.rs"]
+pub mod image_compress;
+#[cfg(feature = "image-codecs")]
+pub mod image_validate;
+#[cfg(not(feature = "image-codecs"))]
+#[path = "image_validate_stub.rs"]
 pub mod image_validate;
 pub mod mcp_truncate;
 pub mod path_suggestions;

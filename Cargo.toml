@@ -132,7 +132,13 @@ blake3 = "1"
 bytes = { version = "1", features = ["serde"] }
 camino = "1.1.10"
 chrono = "0.4"
-clap = { version = "4", features = ["derive", "env"] }
+clap = { version = "4", default-features = false, features = [
+  "derive",
+  "env",
+  "help",
+  "std",
+  "usage",
+] }
 clap_complete = { version = "4" }
 colored_json = "5"
 core-foundation = "0.10"
@@ -333,13 +339,13 @@ xai-grok-sampler = { path = "crates/codegen/xai-grok-sampler" }
 xai-grok-secrets = { path = "crates/codegen/xai-grok-secrets" }
 xai-grok-session-events = { path = "crates/codegen/xai-grok-session-events" }
 xai-grok-session-search = { path = "crates/codegen/xai-grok-session-search" }
-xai-grok-shared = { path = "crates/codegen/xai-grok-shared" }
+xai-grok-shared = { path = "crates/codegen/xai-grok-shared", default-features = false }
 xai-grok-shell = { path = "crates/codegen/xai-grok-shell" }
-xai-grok-shell-base = { path = "crates/codegen/xai-grok-shell-base" }
+xai-grok-shell-base = { path = "crates/codegen/xai-grok-shell-base", default-features = false }
 xai-grok-shell-session-support = { path = "crates/codegen/xai-grok-shell-session-support" }
 xai-grok-telemetry = { path = "crates/codegen/xai-grok-telemetry" }
 xai-grok-test-support = { path = "crates/codegen/xai-grok-test-support" }
-xai-grok-tools = { path = "crates/codegen/xai-grok-tools" }
+xai-grok-tools = { path = "crates/codegen/xai-grok-tools", default-features = false, features = ["serde"] }
 xai-grok-tools-api = { path = "crates/codegen/xai-grok-tools-api" }
 xai-grok-version = { path = "crates/codegen/xai-grok-version" }
 xai-grok-workspace = { path = "crates/codegen/xai-grok-workspace" }

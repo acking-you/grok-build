@@ -12,6 +12,7 @@ pub struct ModelProviderConfig {
     pub env_key: Option<EnvKeys>,
     pub api_key: Option<String>,
     pub api_backend: Option<ApiBackend>,
+    pub auth_scheme: Option<xai_grok_sampler::AuthScheme>,
     pub extra_headers: IndexMap<String, String>,
     /// Query parameters folded into every request URL; inherited by models.
     pub query_params: IndexMap<String, String>,
@@ -179,6 +180,7 @@ impl ConfigModelOverride {
             env_key,
             api_key,
             api_backend,
+            auth_scheme,
             extra_headers,
             query_params,
             env_http_headers,
@@ -192,6 +194,7 @@ impl ConfigModelOverride {
         merged.base_url = merged.base_url.or_else(|| base_url.clone());
         merged.api_base_url = merged.api_base_url.or_else(|| api_base_url.clone());
         merged.api_backend = merged.api_backend.or_else(|| api_backend.clone());
+        merged.auth_scheme = merged.auth_scheme.or(*auth_scheme);
         merged.context_window = merged.context_window.or(*context_window);
         // Inherited wholesale only when the model sets none of its own.
         if merged.extra_headers.is_empty() {
@@ -230,6 +233,30 @@ impl ConfigModelOverride {
 #[cfg(test)]
 mod tests {
     use crate::agent::config::{Config, resolve_credentials, resolve_model_list};
+
+    #[test]
+    fn model_override_applies_auth_scheme() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.runtime]
+            model = "claude"
+            base_url = "https://gateway.example/v1"
+            api_backend = "messages"
+            auth_scheme = "x_api_key"
+            api_key = "sk-provider"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("runtime").expect("model should exist");
+        assert_eq!(
+            model.info.auth_scheme,
+            xai_grok_sampler::AuthScheme::XApiKey
+        );
+    }
+
     #[test]
     fn model_inherits_provider_connection_defaults() {
         let raw_config: toml::Value = toml::from_str(
@@ -730,6 +757,7 @@ mod tests {
             base_url = "https://gateway.example/v1"
             api_base_url = "https://gateway.example/api"
             api_backend = "responses"
+            auth_scheme = "x_api_key"
             api_key = "sk-provider"
 
             [model.via-gateway]
@@ -745,6 +773,10 @@ mod tests {
         assert_eq!(
             model.info.api_backend,
             crate::sampling::ApiBackend::Responses
+        );
+        assert_eq!(
+            model.info.auth_scheme,
+            xai_grok_sampler::AuthScheme::XApiKey
         );
         assert_eq!(
             model.api_base_url.as_deref(),

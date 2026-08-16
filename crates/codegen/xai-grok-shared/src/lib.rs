@@ -2,7 +2,10 @@
 //! (e.g. `xai-grok-pager-render`). This crate sits upstream of `xai-grok-shell`
 //! so it must never depend on it.
 
+#[cfg(feature = "clipboard")]
 pub mod clipboard;
+#[cfg(not(feature = "clipboard"))]
+pub mod clipboard {}
 pub mod placeholder_images;
 pub mod session;
 pub mod stderr;

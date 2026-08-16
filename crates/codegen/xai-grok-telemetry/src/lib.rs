@@ -13,6 +13,10 @@ pub mod context;
 pub mod debug_log;
 pub mod enums;
 pub mod events;
+#[cfg(feature = "telemetry-exporters")]
+pub mod external;
+#[cfg(not(feature = "telemetry-exporters"))]
+#[path = "external_stub.rs"]
 pub mod external;
 pub mod hooks_log;
 pub mod http;
@@ -20,12 +24,20 @@ pub mod id;
 pub mod instrumentation;
 pub mod memory_log;
 pub mod memory_telemetry;
+#[cfg(feature = "telemetry-exporters")]
 pub mod otel_layer;
+#[cfg(not(feature = "telemetry-exporters"))]
+#[path = "otel_layer_stub.rs"]
+pub mod otel_layer;
+#[cfg(feature = "telemetry-exporters")]
 pub(crate) mod otlp_http;
 pub mod prompt_timing;
+#[cfg_attr(not(feature = "telemetry-exporters"), allow(dead_code))]
 pub(crate) mod redact_common;
 pub mod sampling_log;
+#[cfg(feature = "sentry")]
 pub mod sentry;
+#[cfg_attr(not(feature = "telemetry-exporters"), allow(dead_code))]
 pub mod session_ctx;
 pub mod session_metrics;
 pub mod startup;

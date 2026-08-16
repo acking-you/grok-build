@@ -1,8 +1,5 @@
-//! A small, headless coding-agent runtime.
+//! Serve-only composition root for the original Grok Build runtime.
 
-pub mod config;
-mod runtime;
-mod tools;
+mod serve;
 
-pub use config::{AuthMode, Backend, Cli, ResolvedInput, RuntimeConfig};
-pub use runtime::{AgentRuntime, RunOutcome};
+pub use serve::{AuthScheme, Backend, Cli, ServeRuntime};

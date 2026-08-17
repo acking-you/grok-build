@@ -22,11 +22,15 @@ cargo --version
 rustc --version
 
 # 1. DotSlash — required so bin/protoc can fetch and execute protoc.
-if command -v dotslash >/dev/null 2>&1; then
-  echo "==> dotslash already installed: $(command -v dotslash)"
+#    Pin the validated release (with --locked) so a later DotSlash publish cannot
+#    silently change what this commit installs and break agent startup.
+DOTSLASH_VERSION="0.5.7"
+if command -v dotslash >/dev/null 2>&1 \
+  && dotslash --version 2>/dev/null | grep -qw "$DOTSLASH_VERSION"; then
+  echo "==> dotslash $DOTSLASH_VERSION already installed: $(command -v dotslash)"
 else
-  echo "==> Installing dotslash"
-  cargo install dotslash
+  echo "==> Installing dotslash $DOTSLASH_VERSION"
+  cargo install dotslash --version "$DOTSLASH_VERSION" --locked
 fi
 
 echo "==> Verifying hermetic protoc via dotslash"

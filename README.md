@@ -60,8 +60,12 @@ Concretely, the fork:
   serving, exposes hosted web search to the runtime, hardens inference
   idle-timeouts, and fixes an Anthropic large-output stall.
 
-The upstream product is unchanged: this fork only *adds* the runtime and
-*narrows* the runtime's own dependency set.
+The upstream `grok` TUI stays fully functional. Beyond adding the runtime and
+narrowing its dependency set, a few hardening fixes also land in **shared**
+crates — notably `xai-grok-sampler` inference idle-timeout handling (the wait
+for response headers / stream start is now bounded) and an Anthropic
+large-output stall fix. The TUI uses that same inference path, so it is affected
+by those shared changes too.
 
 ## Branch model
 
@@ -74,8 +78,9 @@ The root [`SOURCE_REV`](SOURCE_REV) file records the full monorepo commit SHA th
 `upstream` mirror was synced from.
 
 > [!NOTE]
-> This is a fork for local/self-hosted use. External contributions are not
-> accepted upstream — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> This is a fork for local/self-hosted use. Like upstream, this repository does
+> not accept external pull requests or unsolicited patches — see
+> [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## `grok-runtime` — slim headless runtime
 
@@ -96,12 +101,16 @@ Build and run:
 # Build the slim runtime (writes target/runtime-release/grok-runtime)
 cargo build --profile runtime-release -p xai-grok-runtime-bin --bin grok-runtime
 
-# Example: serve an Anthropic-compatible gateway (BYOK)
+# Example: serve an Anthropic-compatible gateway (BYOK).
+# --backend anthropic defaults to the x-api-key scheme; the Anthropic Messages
+# API also requires the anthropic-version header, which the runtime forwards
+# only when you pass it explicitly via --header.
 export GROK_RUNTIME_API_KEY='replace-me'
 ./target/runtime-release/grok-runtime \
   --backend anthropic \
   --base-url https://provider.example/v1 \
   --model claude-sonnet-5 \
+  --header anthropic-version=2023-06-01 \
   --secret change-this-server-secret
 
 # Example: use your existing Grok login (no --backend)
@@ -116,8 +125,9 @@ notes, and equivalent native-config TOML.
 ## Installing the released binary
 
 The upstream `grok` TUI (built from this tree as `xai-grok-pager`, shipped
-officially as `grok`) is unchanged. Prebuilt official binaries are published for
-macOS, Linux, and Windows:
+officially as `grok`) is preserved; aside from the shared inference-hardening
+fixes noted above, it behaves as upstream. Prebuilt official binaries are
+published for macOS, Linux, and Windows:
 
 ```sh
 curl -fsSL https://x.ai/cli/install.sh | bash   # macOS / Linux / Git Bash
@@ -204,7 +214,8 @@ cargo fmt --all               # rustfmt.toml at the repo root
 ## Contributing
 
 > [!NOTE]
-> External contributions are not accepted upstream. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> This repository does not accept external pull requests or unsolicited patches.
+> See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 

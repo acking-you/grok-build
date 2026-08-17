@@ -1,0 +1,4 @@
+{
+  "name": "Grok Build",
+  "install": "bash .cursor/install.sh"
+}
